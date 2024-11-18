@@ -1,4 +1,5 @@
 import numpy as np
+import matplotlib.pyplot as plt
 
 # Crear laberinto 100x100
 def create_maze(size=100):
@@ -16,6 +17,7 @@ def create_maze(size=100):
 
     return maze, (goal_x, goal_y)
 
+# Crear laberinto y meta
 maze, goal = create_maze()
 print(f"Labyrinth Goal at: {goal}")
 
@@ -70,24 +72,31 @@ def train_agent(maze, goal, episodes=1000):
 
             # Actualizar tabla Q
             best_next_action = np.max(q_table[new_x, new_y])
-            q_table[x, y, actions.index(action)] = q_table[x, y, actions.index(action)] +                 alpha * (reward + gamma * best_next_action - q_table[x, y, actions.index(action)])
+            q_table[x, y, actions.index(action)] = q_table[x, y, actions.index(action)] + \
+                alpha * (reward + gamma * best_next_action - q_table[x, y, actions.index(action)])
 
             # Actualizar posición
             x, y = new_x, new_y
 
 train_agent(maze, goal, episodes)
 
-import matplotlib.pyplot as plt
-
-# Probar agente
-def evaluate_agent(maze, start, goal):
+# Probar agente con un límite de pasos para evitar bucles infinitos
+def evaluate_agent(maze, start, goal, max_steps=1000):
     path = [start]
     x, y = start
+    steps = 0
 
-    while maze[x, y] != 2:
+    while maze[x, y] != 2 and steps < max_steps:
         action = actions[np.argmax(q_table[x, y])]
-        x, y = move(maze, (x, y), action)
+        new_x, new_y = move(maze, (x, y), action)
+        
+        # Si el agente no se mueve, puede estar atrapado
+        if (new_x, new_y) == (x, y):
+            break
+
+        x, y = new_x, new_y
         path.append((x, y))
+        steps += 1
 
     return path
 
