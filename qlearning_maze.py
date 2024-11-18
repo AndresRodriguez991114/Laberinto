@@ -130,7 +130,7 @@ def plot_path(maze, path, goal):
     for (x, y) in path:
         plt.scatter(y, x, c='red', s=5)
     plt.scatter(*goal[::-1], c='blue', s=100, label='Goal')
-    plt.title("Recorrido del Agente en el Laberinto Realista (100x100)")
+    plt.title("Recorrido del Agente en el Laberinto")
     plt.legend()
     plt.show()
 
