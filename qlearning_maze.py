@@ -1,36 +1,49 @@
+# Modificaciones importantes:
+# 1. Exploración extendida (epsilon_decay ajustado).
+# 2. Recompensas dinámicas basadas en la distancia a la meta.
+# 3. Más episodios para mejorar el aprendizaje.
+# 4. Visualización opcional de progreso durante el entrenamiento.
+
 import numpy as np
 import matplotlib.pyplot as plt
+import random
+import sys
 
-# Crear laberinto 100x100
-def create_maze(size=100):
-    maze = np.zeros((size, size), dtype=int)
+sys.setrecursionlimit(3000)  # Adjust as needed
 
-    # Añadir obstáculos
-    np.random.seed(42)  # Para reproducibilidad
-    for _ in range(size * 10):  # Agregar obstáculos aleatorios
-        x, y = np.random.randint(0, size, size=2)
-        maze[x, y] = 1
-
-    # Definir la meta
-    goal_x, goal_y = np.random.randint(0, size, size=2)
-    maze[goal_x, goal_y] = 2
-
+# ---------------- Generar Laberinto ----------------
+def generate_maze(size=100):
+    maze = np.ones((size, size), dtype=int)
+    def carve_passages_from(x, y):
+        directions = [(0, 2), (2, 0), (0, -2), (-2, 0)]
+        random.shuffle(directions)
+        for dx, dy in directions:
+            nx, ny = x + dx, y + dy
+            if 0 < nx < size and 0 < ny < size and maze[nx, ny] == 1:
+                maze[x + dx // 2, y + dy // 2] = 0
+                maze[nx, ny] = 0
+                carve_passages_from(nx, ny)
+    maze[1, 1] = 0
+    carve_passages_from(1, 1)
+    while True:
+        goal_x, goal_y = random.randint(1, size - 2), random.randint(1, size - 2)
+        if maze[goal_x, goal_y] == 0:
+            maze[goal_x, goal_y] = 2
+            break
     return maze, (goal_x, goal_y)
 
-# Crear laberinto y meta
-maze, goal = create_maze()
+# Generar laberinto y meta
+maze, goal = generate_maze(size=100)
 print(f"Labyrinth Goal at: {goal}")
 
-# Acciones: 0: arriba, 1: abajo, 2: izquierda, 3: derecha
+# ---------------- Parámetros y Validación ----------------
 actions = ['up', 'down', 'left', 'right']
 
-# Validación del movimiento
 def is_valid_move(maze, x, y):
     if x < 0 or y < 0 or x >= maze.shape[0] or y >= maze.shape[1]:
         return False
     return maze[x, y] != 1
 
-# Realizar un movimiento
 def move(maze, position, action):
     x, y = position
     if action == 'up' and is_valid_move(maze, x-1, y):
@@ -41,76 +54,86 @@ def move(maze, position, action):
         return x, y-1
     elif action == 'right' and is_valid_move(maze, x, y+1):
         return x, y+1
-    return x, y  # Movimiento inválido regresa la posición original
+    return x, y
 
-# Configuración de parámetros
-alpha = 0.1  # Tasa de aprendizaje
-gamma = 0.9  # Factor de descuento
-epsilon = 0.1  # Exploración-explotación
-episodes = 1000  # Número de episodios
-size = 100
+# ---------------- Implementación del Algoritmo Q-Learning ----------------
+alpha = 0.1
+gamma = 0.9
+epsilon = 1.0
+epsilon_decay = 0.998  # Decadencia más lenta para mayor exploración
+epsilon_min = 0.1
+max_episodes = 3000  # Aumentar episodios
+max_steps_per_episode = 2000
 
-# Crear tabla Q
-q_table = np.zeros((size, size, len(actions)))
+q_table = np.zeros((maze.shape[0], maze.shape[1], len(actions)))
 
-# Entrenamiento Q-Learning
-def train_agent(maze, goal, episodes=1000):
-    for episode in range(episodes):
-        # Inicializar posición aleatoria
-        x, y = np.random.randint(0, maze.shape[0], size=2)
+def train_agent(maze, goal, max_episodes):
+    global epsilon
+    for episode in range(max_episodes):
+        x, y = 1, 1
+        steps = 0
 
-        while maze[x, y] != 2:  # Hasta alcanzar el objetivo
-            # Elegir acción (epsilon-greedy)
+        while maze[x, y] != 2 and steps < max_steps_per_episode:
             if np.random.rand() < epsilon:
                 action = np.random.choice(actions)
             else:
                 action = actions[np.argmax(q_table[x, y])]
 
-            # Realizar acción
             new_x, new_y = move(maze, (x, y), action)
-            reward = 1 if (new_x, new_y) == goal else -0.1
 
-            # Actualizar tabla Q
+            # Recompensas ajustadas
+            if (new_x, new_y) == goal:
+                reward = 100
+            elif (new_x, new_y) == (x, y):
+                reward = -50
+            else:
+                distance_to_goal = abs(goal[0] - new_x) + abs(goal[1] - new_y)
+                reward = -1 - 0.1 * distance_to_goal  # Penalización basada en distancia
+
             best_next_action = np.max(q_table[new_x, new_y])
-            q_table[x, y, actions.index(action)] = q_table[x, y, actions.index(action)] + \
-                alpha * (reward + gamma * best_next_action - q_table[x, y, actions.index(action)])
+            q_table[x, y, actions.index(action)] += alpha * (
+                reward + gamma * best_next_action - q_table[x, y, actions.index(action)]
+            )
 
-            # Actualizar posición
             x, y = new_x, new_y
+            steps += 1
 
-train_agent(maze, goal, episodes)
+        if epsilon > epsilon_min:
+            epsilon *= epsilon_decay
 
-# Probar agente con un límite de pasos para evitar bucles infinitos
-def evaluate_agent(maze, start, goal, max_steps=1000):
+        if episode % 100 == 0:
+            print(f"Episode {episode + 1}/{max_episodes} completed.")
+
+train_agent(maze, goal, max_episodes)
+
+# ---------------- Evaluación del Modelo ----------------
+def evaluate_agent(maze, start, goal):
     path = [start]
     x, y = start
     steps = 0
 
-    while maze[x, y] != 2 and steps < max_steps:
+    while maze[x, y] != 2 and steps < max_steps_per_episode:
         action = actions[np.argmax(q_table[x, y])]
         new_x, new_y = move(maze, (x, y), action)
-        
-        # Si el agente no se mueve, puede estar atrapado
         if (new_x, new_y) == (x, y):
             break
-
         x, y = new_x, new_y
         path.append((x, y))
         steps += 1
 
     return path
 
-# Generar camino
-start = (0, 0)
-path = evaluate_agent(maze, start, goal)
-
-# Visualizar el recorrido
-def plot_path(maze, path):
-    plt.figure(figsize=(10, 10))
-    plt.imshow(maze, cmap='gray')
+# ---------------- Visualización ----------------
+def plot_path(maze, path, goal):
+    plt.figure(figsize=(12, 12))
+    plt.imshow(maze, cmap=plt.cm.binary, origin="upper")
     for (x, y) in path:
-        plt.scatter(y, x, c='red', s=1)
-    plt.title("Recorrido del Agente")
+        plt.scatter(y, x, c='red', s=5)
+    plt.scatter(*goal[::-1], c='blue', s=100, label='Goal')
+    plt.title("Recorrido del Agente en el Laberinto Realista (100x100)")
+    plt.legend()
     plt.show()
 
-plot_path(maze, path)
+start = (1, 1)
+path = evaluate_agent(maze, start, goal)
+plot_path(maze, path, goal)
